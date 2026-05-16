@@ -14,6 +14,12 @@ android {
         versionName "1.0"
     }
 
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            outputFileName = "jumping-mbappe-${variant.buildType.name}.apk"
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix ".debug"

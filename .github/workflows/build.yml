@@ -44,8 +44,8 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: jumping-gianluigi-debug-${{ github.run_number }}
-          path: app/build/outputs/apk/debug/*.apk
+          name: jumping-mbappe-build-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/jumping-mbappe-debug.apk
           retention-days: 30
 
       # Only create a GitHub Release when merging to main
@@ -54,7 +54,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          APK="app/build/outputs/apk/debug/jumping-mbappe-debug.apk"
           TAG="v1.0-build-${{ github.run_number }}"
           gh release create "$TAG" "$APK" \
             --repo "${{ github.repository }}" \
