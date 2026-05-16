@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
@@ -17,6 +18,7 @@ import com.jumping.gianluigi.effects.Particle;
 import com.jumping.gianluigi.entities.Enemy;
 import com.jumping.gianluigi.entities.Player;
 import com.jumping.gianluigi.entities.PowerUp;
+import com.jumping.gianluigi.sound.SoundManager;
 import com.jumping.gianluigi.world.Level;
 import com.jumping.gianluigi.world.LevelFactory;
 import com.jumping.gianluigi.world.Platform;
@@ -28,101 +30,95 @@ import java.util.Random;
 
 public class GameView extends SurfaceView implements SurfaceHolder.Callback {
 
-    // ── Game states ────────────────────────────────────────────────────────
+    // ── States ────────────────────────────────────────────────────────────
     private enum State { MENU, PLAYING, DEAD, LEVEL_WIN, GAME_OVER }
 
-    // ── Constants ──────────────────────────────────────────────────────────
-    private static final int   TARGET_FPS  = 60;
-    private static final long  FRAME_MS    = 1000 / TARGET_FPS;
+    private static final long  FRAME_MS    = 1000 / 60;
     private static final float CAMERA_LEAD = Constants.VW * 0.30f;
 
-    // ── Game thread ────────────────────────────────────────────────────────
+    // ── Thread ────────────────────────────────────────────────────────────
     private GameThread thread;
     private volatile boolean running;
 
-    // ── Rendering ──────────────────────────────────────────────────────────
+    // ── Render helpers ────────────────────────────────────────────────────
     private final Paint  paint  = new Paint();
     private final Matrix matrix = new Matrix();
-    private float scaleX, scaleY, scale, offsetX, offsetY;
+    private float scale, offsetX, offsetY;
 
-    // ── Game state ─────────────────────────────────────────────────────────
+    // ── Game state ────────────────────────────────────────────────────────
     private State  state;
-    private int    lives;
-    private int    score;
-    private int    currentLevel;
+    private int    lives, score, currentLevel;
 
-    // ── World ──────────────────────────────────────────────────────────────
+    // ── World ─────────────────────────────────────────────────────────────
     private Level         level;
     private Player        player;
     private List<Enemy>   enemies;
     private List<PowerUp> powerUps;
     private List<Particle> particles;
 
-    // ── Camera ─────────────────────────────────────────────────────────────
+    // ── Camera ────────────────────────────────────────────────────────────
     private float cameraX;
 
-    // ── Transition timer ───────────────────────────────────────────────────
+    // ── Timers ────────────────────────────────────────────────────────────
     private float stateTimer;
+    private long  lastTime = System.currentTimeMillis();
 
-    // ── Background sky gradient (cached) ──────────────────────────────────
+    // ── Sky gradient (cached) ─────────────────────────────────────────────
     private Paint skyPaint;
 
-    // ── Cloud positions (decorative) ───────────────────────────────────────
-    private float[] cloudX, cloudY;
+    // ── Decorative background ─────────────────────────────────────────────
+    private float[] cloudX  = {80, 350, 620, 180, 750};
+    private float[] cloudY  = {55,  35,  75,  95,  45};
+    private float   cloudScroll;
+    private float[] mountainX = {0, 220, 440, 660, 880, 1100};
+
+    // ── Mute button ──────────────────────────────────────────────────────
+    private RectF muteRect;
 
     public GameView(Context ctx) {
         super(ctx);
         getHolder().addCallback(this);
         setFocusable(true);
-        paint.setAntiAlias(false);  // crisp pixel art
-        initClouds();
+        paint.setAntiAlias(false);
         loadMenu();
     }
 
-    // ── Lifecycle ──────────────────────────────────────────────────────────
+    // ── Lifecycle ─────────────────────────────────────────────────────────
 
-    @Override
-    public void surfaceCreated(SurfaceHolder holder) {
-        updateScale();
+    @Override public void surfaceCreated(SurfaceHolder h) { updateScale(); startThread(); }
+    @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h2) { updateScale(); }
+    @Override public void surfaceDestroyed(SurfaceHolder h) { stopThread(); }
+
+    public void pause()  { stopThread(); }
+    public void resume() { if (!running) startThread(); }
+
+    private void startThread() {
         running = true;
+        lastTime = System.currentTimeMillis();
         thread = new GameThread();
         thread.start();
     }
 
-    @Override
-    public void surfaceChanged(SurfaceHolder h, int fmt, int w, int h2) {
-        updateScale();
-    }
-
-    @Override
-    public void surfaceDestroyed(SurfaceHolder holder) {
+    private void stopThread() {
         running = false;
-        try { thread.join(500); } catch (InterruptedException ignored) {}
+        try { if (thread != null) thread.join(500); } catch (InterruptedException ignored) {}
     }
 
-    public void pause()  { running = false; }
-    public void resume() {
-        if (!running) { running = true; thread = new GameThread(); thread.start(); }
-    }
-
-    // ── Input ──────────────────────────────────────────────────────────────
+    // ── Input ─────────────────────────────────────────────────────────────
 
     @Override
     public boolean onTouchEvent(MotionEvent ev) {
-        if (ev.getAction() == MotionEvent.ACTION_DOWN) {
-            handleTap();
-        }
-        return true;
-    }
+        if (ev.getAction() != MotionEvent.ACTION_DOWN) return true;
 
-    private void handleTap() {
+        // Mute button (screen coords, top-right)
+        if (muteRect != null && muteRect.contains(ev.getX(), ev.getY())) {
+            SoundManager.setMuted(!SoundManager.isMuted());
+            return true;
+        }
+
         switch (state) {
-            case MENU:
-                startGame(1);
-                break;
-            case PLAYING:
-                player.tryJump();
-                break;
+            case MENU:       startGame(1);           break;
+            case PLAYING:    handleJump();            break;
             case DEAD:
                 if (stateTimer <= 0) {
                     if (lives > 0) startGame(currentLevel);
@@ -132,55 +128,57 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
             case LEVEL_WIN:
                 if (stateTimer <= 0) startGame(currentLevel + 1);
                 break;
-            case GAME_OVER:
-                loadMenu();
-                break;
+            case GAME_OVER:  loadMenu();              break;
+        }
+        return true;
+    }
+
+    private void handleJump() {
+        boolean wasOnGround  = player.onGround;
+        boolean hadDoubleJump = player.hasDoubleJump;
+        player.tryJump();
+        if (player.onGround != wasOnGround || !player.onGround) {
+            if (!hadDoubleJump && player.hasDoubleJump) {
+                SoundManager.playJump();
+            } else if (!player.hasDoubleJump && hadDoubleJump) {
+                SoundManager.playDoubleJump();
+            } else {
+                SoundManager.playJump();
+            }
         }
     }
 
-    // ── Initialization ─────────────────────────────────────────────────────
+    // ── Init ──────────────────────────────────────────────────────────────
 
     private void loadMenu() {
-        state = State.MENU;
-        lives = Constants.START_LIVES;
-        score = 0;
-        currentLevel = 1;
-        player   = new Player(Constants.VW * 0.3f);
-        enemies  = new ArrayList<>();
-        powerUps = new ArrayList<>();
-        particles= new ArrayList<>();
-        cameraX  = 0;
-        level    = LevelFactory.create(1);
+        state = State.MENU; lives = Constants.START_LIVES; score = 0; currentLevel = 1;
+        player    = new Player(Constants.VW * 0.3f);
+        enemies   = new ArrayList<>(); powerUps = new ArrayList<>(); particles = new ArrayList<>();
+        cameraX   = 0;
+        level     = LevelFactory.create(1);
     }
 
-    private void startGame(int lvlNum) {
-        currentLevel = lvlNum;
-        level  = LevelFactory.create(lvlNum);
-        player = new Player(120f);
-        cameraX = 0;
-        state  = State.PLAYING;
+    private void startGame(int n) {
+        currentLevel = n;
+        level    = LevelFactory.create(n);
+        player   = new Player(120f);
+        cameraX  = 0;
+        state    = State.PLAYING;
         stateTimer = 0;
 
-        // Spawn enemies from level data
         enemies = new ArrayList<>();
         for (float[] e : level.enemies) {
             Enemy en = new Enemy(e[0], e[1], e[2]);
-            en.speed = 65f + (lvlNum - 1) * 10f;
+            en.speed = 55f + (n - 1) * 14f;
             enemies.add(en);
         }
-
-        // Spawn power-ups
-        powerUps = new ArrayList<>();
-        for (float[] p : level.powerUps) {
+        powerUps  = new ArrayList<>();
+        for (float[] p : level.powerUps)
             powerUps.add(new PowerUp(p[0], p[1], (int) p[2]));
-        }
-
         particles = new ArrayList<>();
     }
 
-    // ── Game loop ──────────────────────────────────────────────────────────
-
-    private long lastTime = System.currentTimeMillis();
+    // ── Game loop ─────────────────────────────────────────────────────────
 
     private void update() {
         long now = System.currentTimeMillis();
@@ -188,32 +186,23 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         lastTime = now;
 
         switch (state) {
-            case MENU:
-                updateMenu(dt);
-                break;
-            case PLAYING:
-                updatePlaying(dt);
-                break;
-            case DEAD:
-                updateDead(dt);
-                break;
-            case LEVEL_WIN:
-                updateLevelWin(dt);
-                break;
+            case MENU:      updateMenu(dt);    break;
+            case PLAYING:   updatePlaying(dt); break;
+            case DEAD:      updateDead(dt);    break;
+            case LEVEL_WIN: stateTimer -= dt; if (stateTimer < 0) stateTimer = 0; scrollClouds(dt); break;
+            case GAME_OVER: scrollClouds(dt);  break;
         }
     }
 
     private void updateMenu(float dt) {
-        // Animate demo player
         player.update(dt);
-        if (player.y > Constants.GROUND_Y - Constants.PH)
-            player.land(Constants.GROUND_Y);
+        if (player.y > Constants.GROUND_Y - Constants.PH) player.land(Constants.GROUND_Y);
         scrollClouds(dt);
     }
 
     private void updatePlaying(float dt) {
         player.update(dt);
-        resolvePlayerCollisions();
+        resolveCollisions();
         checkFall();
 
         for (Enemy en : enemies) en.update(dt);
@@ -224,15 +213,10 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         checkFinish();
 
         Iterator<Particle> pit = particles.iterator();
-        while (pit.hasNext()) {
-            Particle p = pit.next();
-            p.update(dt);
-            if (p.isDead()) pit.remove();
-        }
+        while (pit.hasNext()) { Particle p = pit.next(); p.update(dt); if (p.isDead()) pit.remove(); }
 
-        // Camera: follow player with lead
-        float targetCam = player.x - CAMERA_LEAD;
-        cameraX = Math.max(0, Math.min(targetCam, level.width - Constants.VW));
+        float target = player.x - CAMERA_LEAD;
+        cameraX = Math.max(0, Math.min(target, level.width - Constants.VW));
 
         scrollClouds(dt);
     }
@@ -244,73 +228,49 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         scrollClouds(dt);
     }
 
-    private void updateLevelWin(float dt) {
-        stateTimer -= dt;
-        if (stateTimer < 0) stateTimer = 0;
-        scrollClouds(dt);
-    }
+    // ── Collision ─────────────────────────────────────────────────────────
 
-    // ── Collision detection ────────────────────────────────────────────────
+    private void resolveCollisions() {
+        float pL = player.x, pR = player.x + Constants.PW, pB = player.y + Constants.PH;
 
-    private void resolvePlayerCollisions() {
-        float pL = player.x;
-        float pR = player.x + Constants.PW;
-        float pB = player.y + Constants.PH;
-
-        // ── Ground segments ──
         for (float[] seg : level.groundSegs) {
-            if (pR > seg[0] && pL < seg[1]) {
-                // Within x range of segment
-                if (player.vy >= 0 && pB >= Constants.GROUND_Y && player.y < Constants.GROUND_Y) {
-                    player.land(Constants.GROUND_Y);
-                    break;
-                }
+            if (pR > seg[0] && pL < seg[1] && player.vy >= 0
+                    && pB >= Constants.GROUND_Y && player.y < Constants.GROUND_Y) {
+                player.land(Constants.GROUND_Y);
+                return;
             }
         }
-
-        // ── Platforms ──
-        for (Platform plat : level.platforms) {
-            if (pR > plat.x && pL < plat.right()) {
-                float prevBottom = player.y + Constants.PH - player.vy * 0.016f; // approx prev frame
-                if (player.vy >= 0 && pB >= plat.y && prevBottom <= plat.y + 4) {
-                    player.land(plat.y);
-                    break;
-                }
+        for (Platform pl : level.platforms) {
+            if (pR > pl.x && pL < pl.right() && player.vy >= 0
+                    && pB >= pl.y && pB <= pl.y + Constants.PLATFORM_H + player.vy * 0.018f) {
+                player.land(pl.y);
+                return;
             }
         }
     }
 
     private void checkFall() {
-        if (player.y > Constants.VH + 50) {
-            killPlayer();
-        }
+        if (player.y > Constants.VH + 60) killPlayer();
     }
 
     private void checkEnemyCollisions() {
         if (player.dead) return;
         RectF pb = player.getBounds();
-
         for (Enemy en : enemies) {
             if (!en.alive) continue;
             RectF eb = en.getBounds();
             if (!RectF.intersects(pb, eb)) continue;
 
-            // Stomp: player bottom hits enemy top from above
-            float overlapTop = en.y + Constants.EH * 0.3f;
-            if (player.vy > 0 && pb.bottom <= overlapTop + 16 && pb.top < en.y) {
-                // Stomp enemy
-                stompEnemy(en);
-                player.vy = Constants.JUMP_VEL * 0.55f; // bounce
+            if (player.vy > 0 && pb.bottom <= en.y + Constants.EH * 0.35f) {
+                en.stomp();
+                score += 100;
+                SoundManager.playStomp();
+                spawnExplosion(en.x + Constants.EW / 2f, en.y + Constants.EH / 2f);
+                player.vy = Constants.JUMP_VEL * 0.5f;
             } else if (!player.isInvincible()) {
                 killPlayer();
             }
         }
-    }
-
-    private void stompEnemy(Enemy en) {
-        en.stomp();
-        score += 100;
-        spawnExplosion(en.x + Constants.EW / 2, en.y + Constants.EH / 2);
     }
 
     private void checkPowerUpCollisions() {
@@ -321,233 +281,237 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
                 pu.collected = true;
                 player.collectPowerUp(pu.type);
                 score += 200;
+                SoundManager.playPowerUp();
             }
         }
     }
 
     private void checkFinish() {
         if (player.x + Constants.PW >= level.finishX) {
-            score += 500 + currentLevel * 100;
+            score += 500 + currentLevel * 150;
             state = State.LEVEL_WIN;
             stateTimer = 2.5f;
+            SoundManager.playLevelWin();
         }
     }
 
     private void killPlayer() {
         if (player.dead) return;
         player.die();
+        SoundManager.playDie();
         lives--;
-        state = State.DEAD;
+        state = lives > 0 ? State.DEAD : State.GAME_OVER;
         stateTimer = 2.0f;
-        if (lives <= 0) state = State.GAME_OVER;
     }
 
-    // ── Particle explosion ────────────────────────────────────────────────
+    // ── Particles ─────────────────────────────────────────────────────────
 
     private void spawnExplosion(float cx, float cy) {
         Random rng = new Random();
-        int[] colors = {0xFFFF4400, 0xFFFF8800, 0xFFFFDD00, 0xFFFF2200, 0xFFFFFFFF};
-        for (int i = 0; i < 18; i++) {
-            float angle = (float)(Math.PI * 2 * i / 18);
-            float spd   = 150 + rng.nextFloat() * 250;
-            float vx    = (float) Math.cos(angle) * spd;
-            float vy    = (float) Math.sin(angle) * spd - 100;
-            int   col   = colors[rng.nextInt(colors.length)];
-            float sz    = 4f + rng.nextFloat() * 8f;
-            particles.add(new Particle(cx, cy, vx, vy, 0.6f + rng.nextFloat() * 0.4f, col, sz));
+        int[] cols = {0xFFFF4400, 0xFFFF8800, 0xFFFFDD00, 0xFFFF2200, 0xFFFFFFFF, 0xFF88FF00};
+        for (int i = 0; i < 20; i++) {
+            double a = Math.PI * 2 * i / 20;
+            float spd = 160 + rng.nextFloat() * 280;
+            float vx = (float) Math.cos(a) * spd;
+            float vy = (float) Math.sin(a) * spd - 80;
+            float sz = 4f + rng.nextFloat() * 10f;
+            particles.add(new Particle(cx, cy, vx, vy, 0.5f + rng.nextFloat() * 0.4f,
+                    cols[rng.nextInt(cols.length)], sz));
         }
     }
 
-    // ── Clouds ────────────────────────────────────────────────────────────
+    // ── Background helpers ────────────────────────────────────────────────
 
-    private void initClouds() {
-        cloudX = new float[]{100, 400, 650, 200, 800};
-        cloudY = new float[]{60,  40,  80,  100, 50};
-    }
+    private void scrollClouds(float dt) { cloudScroll += dt * 18f; }
 
-    private float cloudScroll;
-    private void scrollClouds(float dt) {
-        cloudScroll += dt * 20f;
-        if (cloudScroll > Constants.VW) cloudScroll = 0;
-    }
-
-    // ── Scale ──────────────────────────────────────────────────────────────
+    // ── Scale ─────────────────────────────────────────────────────────────
 
     private void updateScale() {
-        int sw = getWidth();
-        int sh = getHeight();
+        int sw = getWidth(), sh = getHeight();
         if (sw == 0 || sh == 0) return;
-        scaleX = (float) sw / Constants.VW;
-        scaleY = (float) sh / Constants.VH;
-        scale  = Math.min(scaleX, scaleY);
+        scale   = Math.min((float) sw / Constants.VW, (float) sh / Constants.VH);
         offsetX = (sw - Constants.VW * scale) / 2f;
         offsetY = (sh - Constants.VH * scale) / 2f;
+        muteRect = new RectF(sw - 80, 8, sw - 8, 56);
         buildSky(sh);
     }
 
     private void buildSky(int sh) {
         skyPaint = new Paint();
-        LinearGradient grad = new LinearGradient(
-                0, 0, 0, sh,
-                new int[]{0xFF4FC3F7, 0xFF81D4FA, 0xFFB3E5FC},
-                null, Shader.TileMode.CLAMP);
-        skyPaint.setShader(grad);
+        skyPaint.setShader(new LinearGradient(0, 0, 0, sh,
+                new int[]{0xFF2980B9, 0xFF6DD5FA, 0xFFB8E4FF}, null, Shader.TileMode.CLAMP));
     }
 
     // ── Rendering ─────────────────────────────────────────────────────────
 
     private void render(Canvas canvas) {
-        int sw = getWidth();
-        int sh = getHeight();
+        int sw = getWidth(), sh = getHeight();
+        if (sw == 0 || sh == 0) return;
 
-        // Sky background (full screen, no matrix)
+        // Sky
         if (skyPaint != null) canvas.drawRect(0, 0, sw, sh, skyPaint);
         else { paint.setColor(0xFF4FC3F7); canvas.drawRect(0, 0, sw, sh, paint); }
 
-        // Apply view matrix (scale + camera offset)
+        // World matrix
         matrix.reset();
         matrix.setScale(scale, scale);
         matrix.postTranslate(offsetX - cameraX * scale, offsetY);
         canvas.save();
         canvas.setMatrix(matrix);
 
+        drawMountains(canvas);
         drawClouds(canvas);
+        drawTrees(canvas);
         drawWorld(canvas);
         drawEntities(canvas);
-        drawParticles(canvas);
+
+        for (Particle p : particles) p.draw(canvas, paint);
         drawFinishFlag(canvas);
 
         canvas.restore();
 
-        // HUD (no matrix – screen space)
         drawHUD(canvas, sw, sh);
-
-        // Overlay messages
+        drawMuteButton(canvas, sw);
         drawOverlay(canvas, sw, sh);
+    }
+
+    // ── Background layers ─────────────────────────────────────────────────
+
+    private void drawMountains(Canvas canvas) {
+        // Far mountains (parallax 0.12x)
+        float parallax = cameraX * 0.12f;
+        paint.setColor(0xFF5B7FA6);
+        for (float mx : mountainX) {
+            float bx = ((mx - parallax % 1200) % 1200 + cameraX);
+            drawTriangle(canvas, bx, Constants.GROUND_Y, bx + 280, 180, bx + 560, Constants.GROUND_Y);
+        }
+        // Slightly nearer ridge
+        paint.setColor(0xFF7FA8C9);
+        for (float mx : mountainX) {
+            float bx = ((mx + 140 - parallax * 1.5f % 1200) % 1200 + cameraX);
+            drawTriangle(canvas, bx, Constants.GROUND_Y, bx + 200, 230, bx + 400, Constants.GROUND_Y);
+        }
+    }
+
+    private final Path triPath = new Path();
+    private void drawTriangle(Canvas c, float x1, float y1, float x2, float y2, float x3, float y3) {
+        triPath.reset();
+        triPath.moveTo(x1, y1); triPath.lineTo(x2, y2); triPath.lineTo(x3, y3); triPath.close();
+        c.drawPath(triPath, paint);
     }
 
     private void drawClouds(Canvas canvas) {
         paint.setColor(0xCCFFFFFF);
         for (int i = 0; i < cloudX.length; i++) {
-            float cx = ((cloudX[i] + cloudScroll + cameraX * 0.2f) % (Constants.VW + 200)) - 100;
+            float cx = ((cloudX[i] + cloudScroll * 0.8f + cameraX * 0.22f) % (Constants.VW + 250)) - 125 + cameraX;
             float cy = cloudY[i];
-            // Blocky pixel cloud
-            canvas.drawRect(cx,        cy + 8,  cx + 60,  cy + 24, paint);
-            canvas.drawRect(cx + 12,   cy,      cx + 48,  cy + 16, paint);
-            canvas.drawRect(cx + 8,    cy + 4,  cx + 52,  cy + 20, paint);
+            // Blocky pixel-art cloud
+            canvas.drawRect(cx,      cy + 8,  cx + 70, cy + 24, paint);
+            canvas.drawRect(cx + 14, cy,      cx + 56, cy + 20, paint);
+            canvas.drawRect(cx + 6,  cy + 4,  cx + 64, cy + 22, paint);
+        }
+    }
+
+    private void drawTrees(Canvas canvas) {
+        // Near trees (parallax 0.45x)
+        float p = cameraX * 0.45f;
+        for (int i = 0; i < 20; i++) {
+            float tx = ((i * 460f - p % 9200) % 9200 + cameraX);
+            float ty = Constants.GROUND_Y;
+            // Trunk
+            paint.setColor(0xFF5D4037);
+            canvas.drawRect(tx + 10, ty - 55, tx + 22, ty, paint);
+            // Foliage
+            paint.setColor(0xFF2E7D32);
+            canvas.drawRect(tx,      ty - 100, tx + 32, ty - 50, paint);
+            canvas.drawRect(tx + 4,  ty - 120, tx + 28, ty - 95, paint);
+            paint.setColor(0xFF388E3C);
+            canvas.drawRect(tx + 2,  ty - 110, tx + 30, ty - 55, paint);
         }
     }
 
     private void drawWorld(Canvas canvas) {
-        // Ground segments
+        // Ground grass top strip
         paint.setColor(0xFF4CAF50);
-        for (float[] seg : level.groundSegs) {
-            // Grass top strip
-            canvas.drawRect(seg[0], Constants.GROUND_Y, seg[1], Constants.GROUND_Y + 8, paint);
-        }
+        for (float[] seg : level.groundSegs)
+            canvas.drawRect(seg[0], Constants.GROUND_Y, seg[1], Constants.GROUND_Y + 9, paint);
+        // Ground dirt
         paint.setColor(0xFF795548);
-        for (float[] seg : level.groundSegs) {
-            // Dirt body
-            canvas.drawRect(seg[0], Constants.GROUND_Y + 8, seg[1], Constants.VH + 20, paint);
-        }
-        // Dirt pixel detail lines
+        for (float[] seg : level.groundSegs)
+            canvas.drawRect(seg[0], Constants.GROUND_Y + 9, seg[1], Constants.VH + 20, paint);
+        // Dirt detail lines
         paint.setColor(0xFF6D4C41);
-        for (float[] seg : level.groundSegs) {
-            for (float bx = seg[0]; bx < seg[1]; bx += 32) {
-                canvas.drawRect(bx, Constants.GROUND_Y + 12, bx + 28, Constants.GROUND_Y + 14, paint);
-                canvas.drawRect(bx + 4, Constants.GROUND_Y + 20, bx + 30, Constants.GROUND_Y + 22, paint);
-            }
-        }
+        for (float[] seg : level.groundSegs)
+            for (float bx = seg[0]; bx < seg[1]; bx += 34)
+                canvas.drawRect(bx, Constants.GROUND_Y + 14, bx + 28, Constants.GROUND_Y + 16, paint);
 
         // Platforms
-        for (Platform plat : level.platforms) {
-            // Top (grass green)
-            paint.setColor(0xFF4CAF50);
-            canvas.drawRect(plat.x, plat.y, plat.right(), plat.y + 4, paint);
-            // Body (wood brown)
-            paint.setColor(0xFF8D6E63);
-            canvas.drawRect(plat.x, plat.y + 4, plat.right(), plat.bottom(), paint);
-            // Edge pixels
-            paint.setColor(0xFF5D4037);
-            canvas.drawRect(plat.x, plat.y + 4, plat.x + 4, plat.bottom(), paint);
-            canvas.drawRect(plat.right() - 4, plat.y + 4, plat.right(), plat.bottom(), paint);
+        for (Platform pl : level.platforms) {
+            paint.setColor(0xFF66BB6A);  // grass top
+            canvas.drawRect(pl.x, pl.y, pl.right(), pl.y + 5, paint);
+            paint.setColor(0xFF8D6E63);  // wood body
+            canvas.drawRect(pl.x, pl.y + 5, pl.right(), pl.bottom(), paint);
+            paint.setColor(0xFF5D4037);  // edges
+            canvas.drawRect(pl.x, pl.y + 5, pl.x + 5, pl.bottom(), paint);
+            canvas.drawRect(pl.right() - 5, pl.y + 5, pl.right(), pl.bottom(), paint);
         }
     }
 
     private void drawEntities(Canvas canvas) {
-        // Power-ups
-        for (PowerUp pu : powerUps) {
-            if (!pu.collected) pu.draw(canvas, paint);
-        }
-
-        // Enemies
-        for (Enemy en : enemies) {
-            en.draw(canvas, paint);
-        }
-
-        // Player
-        if (player.dead) {
-            player.drawDead(canvas, paint);
-        } else {
-            player.draw(canvas, paint);
-        }
-    }
-
-    private void drawParticles(Canvas canvas) {
-        for (Particle p : particles) {
-            p.draw(canvas, paint);
-        }
+        for (PowerUp pu : powerUps) if (!pu.collected) pu.draw(canvas, paint);
+        for (Enemy en : enemies)    en.draw(canvas, paint);
+        if (player.dead) player.drawDead(canvas, paint);
+        else             player.draw(canvas, paint);
     }
 
     private void drawFinishFlag(Canvas canvas) {
-        float fx = level.finishX;
-        float gy = Constants.GROUND_Y;
-        // Pole
-        paint.setColor(0xFFCCCCCC);
-        canvas.drawRect(fx, gy - 120, fx + 6, gy, paint);
-        // Flag (animated)
-        paint.setColor(0xFFFF3333);
-        canvas.drawRect(fx + 6, gy - 120, fx + 46, gy - 100, paint);
+        float fx = level.finishX, gy = Constants.GROUND_Y;
+        paint.setColor(0xFFBDBDBD);
+        canvas.drawRect(fx + 2, gy - 130, fx + 8, gy, paint);
+        paint.setColor(0xFFE53935);
+        canvas.drawRect(fx + 8, gy - 130, fx + 52, gy - 108, paint);
+        paint.setColor(Color.WHITE);
+        canvas.drawRect(fx + 8, gy - 120, fx + 52, gy - 116, paint);
+        // Finish text (tiny pixels)
         paint.setColor(0xFFFFFFFF);
-        canvas.drawRect(fx + 6, gy - 112, fx + 46, gy - 108, paint);
+        canvas.drawRect(fx + 12, gy - 128, fx + 48, gy - 125, paint);
     }
 
-    // ── HUD ───────────────────────────────────────────────────────────────
+    // ── HUD ──────────────────────────────────────────────────────────────
 
     private void drawHUD(Canvas canvas, int sw, int sh) {
-        float hudScale = scale * 1.1f;
-        paint.setTypeface(Typeface.MONOSPACE);
-        paint.setTextSize(18 * hudScale);
+        float ts = scale * 1.1f;
         paint.setAntiAlias(true);
+        paint.setTypeface(Typeface.MONOSPACE);
+        paint.setShadowLayer(2 * scale, 0, scale, Color.BLACK);
 
-        // Lives (hearts)
         float hx = offsetX + 10 * scale;
         float hy = offsetY + 22 * scale;
+
+        // Lives
         paint.setColor(Color.WHITE);
-        paint.setShadowLayer(2 * scale, 0, 1 * scale, Color.BLACK);
+        paint.setTextSize(18 * ts);
         canvas.drawText("❤ x" + lives, hx, hy, paint);
 
         // Score
-        String scoreStr = "SCORE " + String.format("%06d", score);
-        paint.setTextSize(14 * hudScale);
-        canvas.drawText(scoreStr, hx, hy + 22 * scale, paint);
+        paint.setTextSize(13 * ts);
+        canvas.drawText(String.format("SCORE %06d", score), hx, hy + 22 * scale, paint);
 
         // Level
-        String lvlStr = "LVL " + currentLevel;
         paint.setTextAlign(Paint.Align.RIGHT);
-        paint.setTextSize(14 * hudScale);
-        canvas.drawText(lvlStr, offsetX + Constants.VW * scale - 10 * scale, hy, paint);
+        paint.setTextSize(14 * ts);
+        canvas.drawText("NVL " + currentLevel, offsetX + Constants.VW * scale - 10 * scale, hy, paint);
         paint.setTextAlign(Paint.Align.LEFT);
 
-        // Power-up indicator
+        // Active power-up
         if (state == State.PLAYING && player.powerUp != PowerUp.NONE) {
-            String pname = (player.powerUp == PowerUp.STAR) ? "STAR"
-                    : (player.powerUp == PowerUp.SPEED) ? "VITESSE"
-                    : "SUPER SAUT";
+            String pname = (player.powerUp == PowerUp.STAR)       ? "★ ÉTOILE"
+                         : (player.powerUp == PowerUp.SPEED)      ? "⚡ VITESSE"
+                         :                                           "↑ SUPER SAUT";
             paint.setColor(0xFFFFDD00);
             paint.setTextAlign(Paint.Align.CENTER);
-            paint.setTextSize(12 * hudScale);
-            canvas.drawText("★ " + pname + " ★", sw / 2f, hy, paint);
+            paint.setTextSize(13 * ts);
+            canvas.drawText(pname, sw / 2f, hy, paint);
             paint.setTextAlign(Paint.Align.LEFT);
         }
 
@@ -555,115 +519,93 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         paint.setAntiAlias(false);
     }
 
-    // ── Overlay (menu / gameover / win) ───────────────────────────────────
+    // ── Mute button ───────────────────────────────────────────────────────
 
-    private void drawOverlay(Canvas canvas, int sw, int sh) {
-        float cx = sw / 2f;
-        float cy = sh / 2f;
+    private void drawMuteButton(Canvas canvas, int sw) {
+        if (muteRect == null) return;
         paint.setAntiAlias(true);
-
-        switch (state) {
-            case MENU:
-                drawOverlayBox(canvas, cx, cy, sw, sh);
-                paint.setColor(0xFFFFDD00);
-                paint.setTextSize(scale * 36);
-                paint.setTextAlign(Paint.Align.CENTER);
-                paint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
-                canvas.drawText("JUMPING GIANLUIGI", cx, cy - scale * 40, paint);
-                paint.setColor(Color.WHITE);
-                paint.setTextSize(scale * 18);
-                canvas.drawText("Tap pour commencer !", cx, cy + scale * 10, paint);
-                paint.setTextSize(scale * 13);
-                canvas.drawText("TAP = saut    TAP TAP = double saut", cx, cy + scale * 40, paint);
-                canvas.drawText("Saute SUR les ennemis pour les tuer !", cx, cy + scale * 58, paint);
-                break;
-
-            case DEAD:
-                drawOverlayBox(canvas, cx, cy, sw, sh);
-                paint.setColor(0xFFFF4444);
-                paint.setTextSize(scale * 32);
-                paint.setTextAlign(Paint.Align.CENTER);
-                paint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
-                canvas.drawText("RATÉ !", cx, cy - scale * 20, paint);
-                paint.setColor(Color.WHITE);
-                paint.setTextSize(scale * 16);
-                canvas.drawText("Vies restantes : " + lives, cx, cy + scale * 15, paint);
-                if (stateTimer <= 0) {
-                    paint.setColor(0xFFFFDD00);
-                    canvas.drawText("Tap pour réessayer", cx, cy + scale * 40, paint);
-                }
-                break;
-
-            case GAME_OVER:
-                drawOverlayBox(canvas, cx, cy, sw, sh);
-                paint.setColor(0xFFFF2222);
-                paint.setTextSize(scale * 36);
-                paint.setTextAlign(Paint.Align.CENTER);
-                paint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
-                canvas.drawText("GAME OVER", cx, cy - scale * 30, paint);
-                paint.setColor(Color.WHITE);
-                paint.setTextSize(scale * 18);
-                canvas.drawText("Score final : " + score, cx, cy + scale * 10, paint);
-                paint.setColor(0xFFFFDD00);
-                paint.setTextSize(scale * 14);
-                canvas.drawText("Tap pour recommencer", cx, cy + scale * 40, paint);
-                break;
-
-            case LEVEL_WIN:
-                drawOverlayBox(canvas, cx, cy, sw, sh);
-                paint.setColor(0xFF88FF44);
-                paint.setTextSize(scale * 32);
-                paint.setTextAlign(Paint.Align.CENTER);
-                paint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
-                canvas.drawText("NIVEAU " + currentLevel + " TERMINÉ !", cx, cy - scale * 25, paint);
-                paint.setColor(Color.WHITE);
-                paint.setTextSize(scale * 16);
-                canvas.drawText("Score : " + score, cx, cy + scale * 10, paint);
-                if (stateTimer <= 0) {
-                    paint.setColor(0xFFFFDD00);
-                    paint.setTextSize(scale * 14);
-                    canvas.drawText("Tap pour le niveau suivant", cx, cy + scale * 38, paint);
-                }
-                break;
-        }
-
+        paint.setColor(0x88000000);
+        canvas.drawRoundRect(muteRect, 8, 8, paint);
+        paint.setColor(Color.WHITE);
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTextSize(24);
+        canvas.drawText(SoundManager.isMuted() ? "🔇" : "🔊",
+                muteRect.centerX(), muteRect.centerY() + 8, paint);
         paint.setTextAlign(Paint.Align.LEFT);
-        paint.setTypeface(Typeface.DEFAULT);
         paint.setAntiAlias(false);
     }
 
-    private void drawOverlayBox(Canvas canvas, float cx, float cy, int sw, int sh) {
-        paint.setColor(0xCC000022);
-        canvas.drawRect(cx - sw * 0.4f, cy - sh * 0.22f, cx + sw * 0.4f, cy + sh * 0.22f, paint);
-        paint.setColor(0xFF3344AA);
-        canvas.drawRect(cx - sw * 0.4f, cy - sh * 0.22f, cx + sw * 0.4f, cy - sh * 0.20f, paint);
+    // ── Overlay screens ───────────────────────────────────────────────────
+
+    private void drawOverlay(Canvas canvas, int sw, int sh) {
+        float cx = sw / 2f, cy = sh / 2f;
+        paint.setAntiAlias(true);
+        switch (state) {
+            case MENU:
+                box(canvas, cx, cy, sw, sh);
+                text(canvas, "JUMPING GIANLUIGI", 0xFFFFDD00, 34, cx, cy - 44 * scale);
+                text(canvas, "Tap pour commencer !", 0xFFFFFFFF, 17, cx, cy + 8 * scale);
+                text(canvas, "TAP = saut  •  TAP TAP = double saut", 0xFFCCCCFF, 12, cx, cy + 36 * scale);
+                text(canvas, "Saute SUR les ennemis pour les éclater !", 0xFFCCCCFF, 12, cx, cy + 54 * scale);
+                break;
+            case DEAD:
+                box(canvas, cx, cy, sw, sh);
+                text(canvas, "RATÉ !", 0xFFFF4444, 30, cx, cy - 18 * scale);
+                text(canvas, "Vies : " + lives, 0xFFFFFFFF, 15, cx, cy + 14 * scale);
+                if (stateTimer <= 0)
+                    text(canvas, "Tap pour réessayer", 0xFFFFDD00, 13, cx, cy + 38 * scale);
+                break;
+            case GAME_OVER:
+                box(canvas, cx, cy, sw, sh);
+                text(canvas, "GAME OVER", 0xFFFF2222, 34, cx, cy - 28 * scale);
+                text(canvas, "Score final : " + score, 0xFFFFFFFF, 16, cx, cy + 10 * scale);
+                text(canvas, "Tap pour recommencer", 0xFFFFDD00, 13, cx, cy + 36 * scale);
+                break;
+            case LEVEL_WIN:
+                box(canvas, cx, cy, sw, sh);
+                text(canvas, "NIVEAU " + currentLevel + " TERMINÉ !", 0xFF88FF44, 28, cx, cy - 22 * scale);
+                text(canvas, "Score : " + score, 0xFFFFFFFF, 15, cx, cy + 8 * scale);
+                if (stateTimer <= 0)
+                    text(canvas, "Tap → niveau suivant", 0xFFFFDD00, 13, cx, cy + 36 * scale);
+                break;
+        }
+        paint.setAntiAlias(false);
+        paint.setTextAlign(Paint.Align.LEFT);
+        paint.setTypeface(Typeface.DEFAULT);
     }
 
-    // ── Game Thread ────────────────────────────────────────────────────────
+    private void box(Canvas c, float cx, float cy, int sw, int sh) {
+        paint.setColor(0xCC000022);
+        c.drawRect(cx - sw * 0.42f, cy - sh * 0.22f, cx + sw * 0.42f, cy + sh * 0.22f, paint);
+        paint.setColor(0xFF1A237E);
+        c.drawRect(cx - sw * 0.42f, cy - sh * 0.22f, cx + sw * 0.42f, cy - sh * 0.18f, paint);
+    }
+
+    private void text(Canvas c, String s, int color, float sp, float cx, float cy) {
+        paint.setColor(color);
+        paint.setTextSize(sp * scale);
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+        c.drawText(s, cx, cy, paint);
+    }
+
+    // ── Game thread ───────────────────────────────────────────────────────
 
     private class GameThread extends Thread {
-        @Override
-        public void run() {
+        @Override public void run() {
             while (running) {
                 long t0 = System.currentTimeMillis();
                 update();
-
                 SurfaceHolder holder = getHolder();
                 Canvas canvas = null;
                 try {
                     canvas = holder.lockCanvas();
-                    if (canvas != null) {
-                        synchronized (holder) { render(canvas); }
-                    }
+                    if (canvas != null) synchronized (holder) { render(canvas); }
                 } finally {
                     if (canvas != null) holder.unlockCanvasAndPost(canvas);
                 }
-
-                long elapsed = System.currentTimeMillis() - t0;
-                long sleep   = FRAME_MS - elapsed;
-                if (sleep > 0) {
-                    try { Thread.sleep(sleep); } catch (InterruptedException ignored) {}
-                }
+                long sleep = FRAME_MS - (System.currentTimeMillis() - t0);
+                if (sleep > 0) try { Thread.sleep(sleep); } catch (InterruptedException ignored) {}
             }
         }
     }
