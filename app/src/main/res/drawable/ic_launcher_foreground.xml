@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Soccer ball-style star for Jumping Gianluigi -->
+    <path
+        android:fillColor="#FFDD00"
+        android:pathData="M54,22 L61,42 L82,42 L66,54 L72,74 L54,62 L36,74 L42,54 L26,42 L47,42Z"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,32 L59,46 L74,46 L62,55 L67,69 L54,60 L41,69 L46,55 L34,46 L49,46Z"/>
+</vector>
