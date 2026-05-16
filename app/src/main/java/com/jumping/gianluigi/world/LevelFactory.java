@@ -5,219 +5,263 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
+/**
+ * Builds all game levels.
+ * Physics reference (GRAVITY=1550, JUMP=-630, SPEED=138):
+ *   max jump height  ≈ 128 px  (single)
+ *   air time         ≈ 0.81 s
+ *   max gap (single) ≈ 112 px
+ *   max gap (double) ≈ 195 px
+ *
+ * Platform heights above ground:
+ *   "low"  = 90-100 px  → reachable with single jump
+ *   "high" = 115-125 px → needs a precise single or easy double
+ */
 public class LevelFactory {
 
-    public static Level create(int levelNum) {
-        switch (levelNum) {
+    private static final float GY = Constants.GROUND_Y;
+
+    public static Level create(int n) {
+        switch (n) {
             case 1: return level1();
             case 2: return level2();
             case 3: return level3();
-            default: return generateRandom(levelNum);
+            default: return generated(n);
         }
     }
 
-    // ── LEVEL 1 ─ Easy: small gaps, few enemies ────────────────────────────
+    // ── LEVEL 1 – Tutorial/Easy ────────────────────────────────────────────
+    // Gaps: 70-90 px  |  Enemies: slow (55 px/s)  |  7 enemies
     private static Level level1() {
-        float gY = Constants.GROUND_Y;
-        float w  = Constants.LEVEL_W_BASE;
+        float w = Constants.LEVEL_W_BASE;
 
+        // Ground: mostly solid, gaps get progressively slightly larger
         float[][] ground = {
-            {0,    1800},
-            {1920, 3400},
-            {3550, 5200},
-            {5400, 7100},
-            {7280, 8900},
-            {9000, w}
+            {0,     1600},  // long safe start
+            {1670,  2900},  // gap 70
+            {2970,  4200},  // gap 70
+            {4290,  5600},  // gap 90
+            {5700,  7000},  // gap 100
+            {7100,  8400},  // gap 100
+            {8500,  w}
         };
 
         List<Platform> plats = new ArrayList<>();
-        plats.add(new Platform(1200, gY - 140, 200));
-        plats.add(new Platform(2600, gY - 160, 200));
-        plats.add(new Platform(4100, gY - 150, 200));
-        plats.add(new Platform(5900, gY - 170, 200));
-        plats.add(new Platform(7800, gY - 150, 200));
+        // Low platforms bridging/over gaps – reachable with single jump
+        plats.add(new Platform(1500, GY - 95,  180)); // before gap 1
+        plats.add(new Platform(2800, GY - 95,  160)); // before gap 2
+        plats.add(new Platform(3200, GY - 95,  160)); // floating
+        plats.add(new Platform(4100, GY - 95,  180)); // before gap 3
+        plats.add(new Platform(5500, GY - 110, 160)); // slightly higher
+        plats.add(new Platform(6900, GY - 100, 160));
+        plats.add(new Platform(8300, GY - 100, 160));
+        // Bonus high platform with power-up
+        plats.add(new Platform(3700, GY - 170, 140)); // needs double
 
-        // enemies: {x, patrolLeft, patrolRight}  (ground enemies)
+        // Enemies: {x, patrolLeft, patrolRight}
         float[][] enemies = {
-            {700,   500,  1400},
-            {1600,  1200, 2500},
-            {2800,  2000, 3200},
-            {3800,  3600, 4800},
-            {5600,  5400, 6600},
-            {7500,  7300, 8200},
-            {9200,  9000, 9900}
+            {600,   350,  1300},
+            {1800,  1670, 2600},
+            {2400,  1800, 2700},
+            {3500,  3000, 4000},
+            {4800,  4400, 5400},
+            {6200,  5900, 6800},
+            {7800,  7300, 8200},
         };
 
-        // power-ups: {x, y, type}
+        // Power-ups: {x, y, type}
         float[][] pups = {
-            {1000, gY - 180, 0},  // STAR
-            {5100, gY - 180, 1},  // SPEED
-            {8500, gY - 180, 2}   // SUPER_JUMP
+            {900,  GY - 130, PowerUpDef.STAR},
+            {3750, GY - 215, PowerUpDef.SUPER_JUMP},  // on high platform
+            {6500, GY - 130, PowerUpDef.SPEED},
         };
 
-        return new Level(1, w, w - 200, ground, plats, enemies, pups);
+        return new Level(1, w, w - 180, ground, plats, enemies, pups);
     }
 
-    // ── LEVEL 2 ─ Medium: wider gaps, more enemies ─────────────────────────
+    // ── LEVEL 2 – Medium ───────────────────────────────────────────────────
+    // Gaps: 100-130 px  |  Enemies: medium (80 px/s)  |  10 enemies
     private static Level level2() {
-        float gY = Constants.GROUND_Y;
-        float w  = Constants.LEVEL_W_BASE + 500;
+        float w = Constants.LEVEL_W_BASE + 400f;
 
         float[][] ground = {
-            {0,    1600},
-            {1800, 3100},
-            {3360, 4900},
-            {5160, 6700},
-            {7000, 8400},
-            {8700, w}
+            {0,     1400},
+            {1520,  2700},  // gap 120
+            {2840,  4100},  // gap 140
+            {4250,  5500},  // gap 150
+            {5660,  6900},  // gap 160
+            {7080,  8200},  // gap 180
+            {8380,  w}
         };
 
         List<Platform> plats = new ArrayList<>();
-        plats.add(new Platform(1000, gY - 150, 200));
-        plats.add(new Platform(1700, gY - 120, 160));  // bridge over gap
-        plats.add(new Platform(2200, gY - 160, 200));
-        plats.add(new Platform(3200, gY - 180, 180));
-        plats.add(new Platform(4000, gY - 140, 160));  // bridge
-        plats.add(new Platform(4960, gY - 120, 160));  // bridge
-        plats.add(new Platform(5700, gY - 200, 200));
-        plats.add(new Platform(6800, gY - 160, 160));  // bridge
-        plats.add(new Platform(7800, gY - 180, 200));
-        plats.add(new Platform(8600, gY - 120, 160));  // bridge
+        // Staircase-style platforms at varied heights
+        plats.add(new Platform(1380, GY - 95,  160));
+        plats.add(new Platform(1600, GY - 115, 140));
+        plats.add(new Platform(2650, GY - 100, 160));
+        plats.add(new Platform(2900, GY - 120, 140));
+        plats.add(new Platform(4100, GY - 110, 160));
+        plats.add(new Platform(4400, GY - 105, 150));
+        plats.add(new Platform(5500, GY - 100, 160));
+        plats.add(new Platform(5800, GY - 130, 140));
+        plats.add(new Platform(6950, GY - 115, 160));
+        plats.add(new Platform(7300, GY - 120, 140));
+        // High bonus platforms
+        plats.add(new Platform(2200, GY - 185, 130));
+        plats.add(new Platform(6000, GY - 200, 130));
 
         float[][] enemies = {
-            {600,   400,  1300},
-            {1200,  900,  1600},
-            {2000,  1800, 2800},
-            {2700,  2200, 3100},
-            {3600,  3400, 4600},
-            {4400,  3800, 4900},
-            {5600,  5200, 6400},
-            {6300,  5800, 6700},
-            {7200,  7000, 8000},
-            {8000,  7500, 8400},
-            {9100,  8800, 10000}
+            {500,   300,  1200},
+            {900,   600,  1400},
+            {1700,  1520, 2500},
+            {2300,  1900, 2700},
+            {3200,  2900, 3900},
+            {3800,  3200, 4100},
+            {4800,  4400, 5300},
+            {5900,  5700, 6600},
+            {6400,  6000, 6900},
+            {7600,  7200, 8200},
         };
 
         float[][] pups = {
-            {800,  gY - 190, 2},
-            {4500, gY - 190, 0},
-            {7500, gY - 190, 1}
+            {700,   GY - 130, PowerUpDef.SPEED},
+            {2250,  GY - 230, PowerUpDef.STAR},       // high platform
+            {6050,  GY - 245, PowerUpDef.SUPER_JUMP}, // high platform
         };
 
-        return new Level(2, w, w - 200, ground, plats, enemies, pups);
+        return new Level(2, w, w - 180, ground, plats, enemies, pups);
     }
 
-    // ── LEVEL 3 ─ Hard: big gaps, fast enemies, platform hopping ──────────
+    // ── LEVEL 3 – Hard ────────────────────────────────────────────────────
+    // Gaps: 130-160 px  |  Enemies: fast (105 px/s)  |  13 enemies
+    // Many gaps require well-timed double-jump with platform stepping
     private static Level level3() {
-        float gY = Constants.GROUND_Y;
-        float w  = Constants.LEVEL_W_BASE + 1000;
+        float w = Constants.LEVEL_W_BASE + 900f;
 
         float[][] ground = {
-            {0,    1400},
-            {1700, 2800},
-            {3200, 4200},
-            {4700, 5600},
-            {6200, 7000},
-            {7600, 8500},
-            {9100, w}
+            {0,     1200},
+            {1360,  2400},  // gap 160
+            {2600,  3700},  // gap 200
+            {3920,  5000},  // gap 220
+            {5220,  6100},  // gap 220
+            {6380,  7200},  // gap 280
+            {7540,  8500},  // gap 340
+            {8880,  w}
         };
 
-        // Many platforms to cross the large gaps
         List<Platform> plats = new ArrayList<>();
-        plats.add(new Platform(1400, gY - 130, 160));
-        plats.add(new Platform(1550, gY - 130, 160));
-        plats.add(new Platform(2850, gY - 160, 180));
-        plats.add(new Platform(3050, gY - 160, 180));
-        plats.add(new Platform(4250, gY - 140, 160));
-        plats.add(new Platform(4450, gY - 140, 160));
-        plats.add(new Platform(5660, gY - 180, 180));
-        plats.add(new Platform(5900, gY - 180, 180));
-        plats.add(new Platform(7050, gY - 160, 160));
-        plats.add(new Platform(7300, gY - 160, 160));
-        plats.add(new Platform(8550, gY - 140, 160));
-        plats.add(new Platform(8750, gY - 140, 160));
-        // High platforms with power-ups
-        plats.add(new Platform(2000, gY - 240, 160));
-        plats.add(new Platform(5200, gY - 260, 160));
-        plats.add(new Platform(8000, gY - 240, 160));
+        // Stepping stones across large gaps
+        plats.add(new Platform(1200, GY - 100, 140));
+        plats.add(new Platform(1450, GY - 120, 120));
+        plats.add(new Platform(2400, GY - 105, 140));
+        plats.add(new Platform(2680, GY - 125, 120));
+        plats.add(new Platform(3720, GY - 110, 140));
+        plats.add(new Platform(3980, GY - 130, 120));
+        plats.add(new Platform(5050, GY - 110, 140));
+        plats.add(new Platform(5300, GY - 130, 120));
+        plats.add(new Platform(6120, GY - 115, 130));
+        plats.add(new Platform(6500, GY - 120, 130));
+        plats.add(new Platform(7380, GY - 115, 140));
+        plats.add(new Platform(7700, GY - 120, 130));
+        plats.add(new Platform(8680, GY - 110, 140));
+        // Skyway bonus platforms
+        plats.add(new Platform(1900, GY - 195, 120));
+        plats.add(new Platform(4500, GY - 205, 120));
+        plats.add(new Platform(7000, GY - 200, 120));
 
         float[][] enemies = {
-            {500,  300,  1200},
-            {900,  600,  1400},
-            {2000, 1800, 2700},
-            {2400, 2000, 2800},
-            {3400, 3200, 4100},
-            {3700, 3300, 4200},
-            {4900, 4700, 5500},
-            {5200, 4800, 5600},
-            {6400, 6200, 6900},
-            {6700, 6300, 7000},
-            {7800, 7600, 8400},
-            {8100, 7700, 8500},
-            {9300, 9100, 10500}
+            {400,   200,  1000},
+            {700,   400,  1200},
+            {1600,  1400, 2200},
+            {2000,  1600, 2400},
+            {2700,  2600, 3500},
+            {3200,  2800, 3700},
+            {4100,  3900, 4700},
+            {4600,  4200, 5000},
+            {5400,  5300, 5900},
+            {5700,  5400, 6100},
+            {6600,  6500, 7000},
+            {7200,  6900, 7600},
+            {8200,  8100, 9000},
         };
 
         float[][] pups = {
-            {2050, gY - 290, 0},  // star on high platform
-            {5250, gY - 310, 2},  // super-jump on high platform
-            {8050, gY - 290, 1}   // speed on high platform
+            {600,   GY - 130, PowerUpDef.SPEED},
+            {1950,  GY - 240, PowerUpDef.STAR},
+            {4550,  GY - 250, PowerUpDef.SUPER_JUMP},
+            {7050,  GY - 245, PowerUpDef.SPEED},
         };
 
-        return new Level(3, w, w - 200, ground, plats, enemies, pups);
+        return new Level(3, w, w - 180, ground, plats, enemies, pups);
     }
 
-    // ── RANDOM LEVEL ─ for levels 4+ ──────────────────────────────────────
-    private static Level generateRandom(int num) {
-        Random rng = new Random(num * 31337L);
-        float gY = Constants.GROUND_Y;
-        float w  = Constants.LEVEL_W_BASE + (num - 3) * 400f;
+    // ── PROCEDURAL GENERATOR for levels 4+ ────────────────────────────────
+    private static Level generated(int n) {
+        Random rng = new Random(n * 98317L);
+        float w   = Constants.LEVEL_W_BASE + (n - 3) * 500f;
+        float diff = Math.min((n - 1) * 0.12f, 0.90f);
 
-        float difficulty = Math.min((num - 1) * 0.15f, 1.0f);
-        float minGap = 120 + difficulty * 80;
-        float maxGap = 200 + difficulty * 120;
+        float minGap = 80  + diff * 80;
+        float maxGap = 110 + diff * 110;
 
-        List<float[]> groundList = new ArrayList<>();
-        List<Platform> plats = new ArrayList<>();
-        List<float[]> enemyList = new ArrayList<>();
-        List<float[]> pupList = new ArrayList<>();
+        List<float[]>   groundList = new ArrayList<>();
+        List<Platform>  platList   = new ArrayList<>();
+        List<float[]>   enemyList  = new ArrayList<>();
+        List<float[]>   pupList    = new ArrayList<>();
 
-        float cursor = 0;
-        groundList.add(new float[]{cursor, cursor + 1000});
-        cursor += 1000;
+        // Safe starting stretch
+        groundList.add(new float[]{0, 1000});
+        float cur = 1000;
+        int  segIdx = 0;
 
-        while (cursor < w - 600) {
+        while (cur < w - 600) {
             float gap = minGap + rng.nextFloat() * (maxGap - minGap);
-            // Bridge platform over gap
-            float bridgeX = cursor + gap * 0.4f;
-            plats.add(new Platform(bridgeX, gY - 100 - rng.nextFloat() * 80, 160));
 
-            cursor += gap;
-            float seg = 800 + rng.nextFloat() * 600;
-            float segEnd = Math.min(cursor + seg, w);
-            groundList.add(new float[]{cursor, segEnd});
+            // One or two stepping platforms across the gap
+            float p1x = cur + gap * 0.35f;
+            platList.add(new Platform(p1x, GY - (90 + rng.nextFloat() * 30), 130));
+            if (gap > 130) {
+                float p2x = cur + gap * 0.65f;
+                platList.add(new Platform(p2x, GY - (95 + rng.nextFloat() * 25), 120));
+            }
 
-            // Enemies on segment
-            int eCount = 1 + (int)(difficulty * 2);
-            float ex = cursor + 200;
+            cur += gap;
+            float seg = 700 + rng.nextFloat() * 700;
+            float segEnd = Math.min(cur + seg, w);
+            groundList.add(new float[]{cur, segEnd});
+
+            // Enemies per segment
+            int eCount = 1 + (int)(diff * 2.5f);
+            float ex = cur + 150;
+            float eSpeed = 55f + diff * 60f;
             for (int i = 0; i < eCount && ex + 200 < segEnd; i++) {
-                enemyList.add(new float[]{ex, ex - 100, Math.min(ex + 400, segEnd - 100)});
-                ex += 400 + rng.nextFloat() * 300;
+                enemyList.add(new float[]{ex, ex - 80, Math.min(ex + 350 + rng.nextFloat()*200, segEnd - 80)});
+                ex += 350 + rng.nextFloat() * 250;
             }
 
-            // Occasional power-up
+            // Occasional bonus platform + power-up
             if (rng.nextFloat() < 0.4f) {
-                int t = rng.nextInt(3);
-                pupList.add(new float[]{cursor + 200, gY - 180, t});
+                float bx = cur + 200 + rng.nextFloat() * 400;
+                platList.add(new Platform(bx, GY - 190, 120));
+                pupList.add(new float[]{bx + 40, GY - 235, rng.nextInt(3)});
             }
 
-            cursor = segEnd;
+            segIdx++;
+            cur = segEnd;
         }
-        groundList.add(new float[]{cursor, w});
+        groundList.add(new float[]{cur, w});
 
-        return new Level(num, w, w - 200,
-            groundList.toArray(new float[0][]),
-            plats,
-            enemyList.toArray(new float[0][]),
-            pupList.toArray(new float[0][]));
+        return new Level(n, w, w - 180,
+                groundList.toArray(new float[0][]),
+                platList,
+                enemyList.toArray(new float[0][]),
+                pupList.toArray(new float[0][]));
+    }
+
+    // Power-up type constants mirror (avoids circular imports)
+    private static final class PowerUpDef {
+        static final int STAR       = 0;
+        static final int SPEED      = 1;
+        static final int SUPER_JUMP = 2;
     }
 }
