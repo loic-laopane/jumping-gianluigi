@@ -1,6 +1,8 @@
 package com.jumping.gianluigi;
 
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
@@ -75,12 +77,51 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     // ── Mute button ──────────────────────────────────────────────────────
     private RectF muteRect;
 
+    // ── Player sprite frames ──────────────────────────────────────────────
+    private Bitmap[] playerSprites;  // [0]=idle, [1..4]=run cycle
+
     public GameView(Context ctx) {
         super(ctx);
         getHolder().addCallback(this);
         setFocusable(true);
         paint.setAntiAlias(false);
+        paint.setFilterBitmap(false);
+        loadPlayerSprites();
         loadMenu();
+    }
+
+    // ── Sprite loading ────────────────────────────────────────────────────
+
+    private void loadPlayerSprites() {
+        try {
+            Bitmap sheet = BitmapFactory.decodeResource(getResources(), R.drawable.player_sprite);
+            if (sheet == null) return;
+            int frameW = sheet.getWidth() / 5;
+            int frameH = sheet.getHeight();
+            playerSprites = new Bitmap[5];
+            for (int i = 0; i < 5; i++) {
+                Bitmap raw = Bitmap.createBitmap(sheet, i * frameW, 0, frameW, frameH);
+                playerSprites[i] = removeBlack(raw);
+                if (raw != playerSprites[i]) raw.recycle();
+            }
+            sheet.recycle();
+        } catch (Exception ignored) {}
+    }
+
+    /** Replace near-black pixels with transparent (removes sprite background). */
+    private static Bitmap removeBlack(Bitmap src) {
+        Bitmap out = src.copy(Bitmap.Config.ARGB_8888, true);
+        int w = out.getWidth(), h = out.getHeight();
+        int[] px = new int[w * h];
+        out.getPixels(px, 0, w, 0, 0, w, h);
+        for (int i = 0; i < px.length; i++) {
+            int r = (px[i] >> 16) & 0xFF;
+            int g = (px[i] >> 8)  & 0xFF;
+            int b =  px[i]        & 0xFF;
+            if (r < 40 && g < 40 && b < 40) px[i] = 0;
+        }
+        out.setPixels(px, 0, w, 0, 0, w, h);
+        return out;
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -153,6 +194,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
     private void loadMenu() {
         state = State.MENU; lives = Constants.START_LIVES; score = 0; currentLevel = 1;
         player    = new Player(Constants.VW * 0.3f);
+        if (playerSprites != null) player.setSprites(playerSprites);
         enemies   = new ArrayList<>(); powerUps = new ArrayList<>(); particles = new ArrayList<>();
         cameraX   = 0;
         level     = LevelFactory.create(1);
@@ -162,6 +204,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback {
         currentLevel = n;
         level    = LevelFactory.create(n);
         player   = new Player(120f);
+        if (playerSprites != null) player.setSprites(playerSprites);
         cameraX  = 0;
         state    = State.PLAYING;
         stateTimer = 0;

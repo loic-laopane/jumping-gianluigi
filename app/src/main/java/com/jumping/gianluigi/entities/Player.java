@@ -1,8 +1,10 @@
 package com.jumping.gianluigi.entities;
 
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.RectF;
 
 import com.jumping.gianluigi.Constants;
@@ -29,6 +31,13 @@ public class Player {
 
     // Star flicker
     private float starFlicker;
+
+    // Sprite sheet: [0]=idle, [1..4]=run cycle
+    private Bitmap[] sprites;
+    private final Rect  srcRect = new Rect();
+    private final RectF dstRect = new RectF();
+
+    public void setSprites(Bitmap[] s) { sprites = s; }
 
     public Player(float startX) {
         x        = startX;
@@ -120,6 +129,19 @@ public class Player {
             paint.setColor(0x80FFFF00);
             canvas.drawRect(px - P*2, py - P*2, px + Constants.PW + P*2,
                             py + Constants.PH + P*2, paint);
+        }
+
+        // Use sprite sheet if loaded; pixel-art fallback otherwise
+        if (sprites != null) {
+            int idx = !onGround ? 0 : (animFrame == 0 ? 1 : 3);
+            Bitmap frame = sprites[idx];
+            srcRect.set(0, 0, frame.getWidth(), frame.getHeight());
+            float dw = Constants.PW;
+            float dh = dw * frame.getHeight() / (float) frame.getWidth();
+            dstRect.set(px, py + Constants.PH - dh, px + dw, py + Constants.PH);
+            paint.setFilterBitmap(false);
+            canvas.drawBitmap(frame, srcRect, dstRect, paint);
+            return;
         }
 
         // Determine swing direction from anim frame
